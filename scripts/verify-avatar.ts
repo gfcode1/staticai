@@ -128,7 +128,10 @@ console.log('\n=== Il predefinito esiste davvero sul disco ===')
 // `url` scritto a mano può sopravvivere a una rinomina del file, e il difetto
 // si vede solo aprendo l'app.
 for (const avatar of BUNDLED) {
-  const percorso = `public${avatar.url}`
+  // L'url contiene il base di deploy (es. '/staticai/models/Kaori.vrm'):
+  // il file su disco si trova dal solo nome, non dal prefisso.
+  const nome = avatar.url.split('/').pop() ?? ''
+  const percorso = `public/models/${nome}`
   let esiste = true
   try {
     const f = await open(percorso, 'r')

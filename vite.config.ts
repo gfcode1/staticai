@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  // Project Pages: l'app è servita da /staticai/, non dalla radice.
+  base: '/staticai/',
   plugins: [react(), tailwindcss()],
   server: {
     host: '127.0.0.1',

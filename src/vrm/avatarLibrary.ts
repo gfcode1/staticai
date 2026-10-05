@@ -52,19 +52,21 @@ export const BUNDLED: BundledAvatar[] = [
     id: 'kaori',
     label: 'Kaori',
     note: 'VRM 0.0 · 14 espressioni · di Fouwaru · licenza: uso personale anche commerciale, non aziendale, ridistribuzione sì ma **modifica vietata**',
-    url: '/models/Kaori.vrm',
+    // BASE_URL vale '/' in dev e '/staticai/' su GitHub Pages: l'URL assoluto
+    // '/models/...' funzionerebbe solo dalla radice e darebbe 404 sulle Pages.
+    url: `${import.meta.env.BASE_URL}models/Kaori.vrm`,
   },
   {
     id: 'olivia',
     label: 'Olivia',
     note: 'VRM 0.0 · 14 espressioni · di lucky · licenza: **credito obbligatorio**, uso personale non commerciale, modifica e ridistribuzione consentite',
-    url: '/models/Olivia.vrm',
+    url: `${import.meta.env.BASE_URL}models/Olivia.vrm`,
   },
   {
     id: 'emma',
     label: 'Emma',
     note: 'VRM 0.0 · 14 espressioni · di Lucky · licenza: **credito obbligatorio**, uso personale non commerciale, modifica e ridistribuzione consentite',
-    url: '/models/Emma.vrm',
+    url: `${import.meta.env.BASE_URL}models/Emma.vrm`,
   },
 ]
 
