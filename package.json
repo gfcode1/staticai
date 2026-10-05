@@ -1,0 +1,43 @@
+{
+  "name": "vrm-chat",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit && node --experimental-strip-types --no-warnings scripts/check-scripts.ts",
+    "test:speech": "node --experimental-strip-types scripts/run-speech-checks.ts",
+    "test:listening": "node --experimental-strip-types scripts/run-listening-checks.ts",
+    "test": "npm run test:speech && npm run test:listening && npm run test:ai && npm run test:tools && npm run test:memory && npm run test:store && npm run test:avatar",
+    "test:ai": "node --experimental-strip-types scripts/run-ai-checks.ts",
+    "test:ui": "node --experimental-strip-types scripts/verify-ui.ts",
+    "test:tools": "node --experimental-strip-types scripts/run-tools-checks.ts",
+    "check:live": "node --experimental-strip-types --no-warnings scripts/check-live-tools.ts",
+    "test:memory": "node --experimental-strip-types scripts/run-memory-checks.ts",
+    "test:store": "node --experimental-strip-types scripts/run-store-checks.ts",
+    "test:avatar": "node --experimental-strip-types scripts/run-avatar-checks.ts"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "3.5.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@types/three": "0.180.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "playwright-core": "^1.63.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  },
+  "description": "Assistente vocale con avatar VRM \u2014 Web Speech API + OpenRouter"
+}
