@@ -171,6 +171,9 @@ src/
     tts.ts                 coda a frasi e rimedi ai difetti di Chrome
     speechController.ts    mette in fila TTS, lip-sync e rig di espressioni
     listening.ts           orchestrazione di ascolto, VAD, STT e barge-in
+    wakeWordConfig.ts      parole chiave, soglie, URL degli asset (puro, testato)
+    wakeWordEngine.ts      pipeline ONNX locale (port di openwakeword_wasm, MIT)
+    wakeWord.ts            singleton del risveglio + bip di conferma
 
   ui/
     AvatarLoader.tsx       overlay di caricamento / errore
@@ -730,6 +733,13 @@ Verificato con Chrome reale, non simulato:
 
 Il riconoscimento vocale usa i server di Google: l'audio lascia il computer
 mentre si parla, e l'applicazione non lo conserva.
+
+**Eccezione: il risveglio vocale.** Nel pannello Camera c'è un interruttore
+opt-in, spento di default: un motore ONNX in background ascolta una parola
+chiave a scelta (`Hey Jarvis`, `Alexa`, …) **tutto nel browser**, e finché non
+la sente nessun audio lascia il computer. Quando la sente, suona un bip e
+avvia una normale sessione di ascolto — e da lì in poi vale quanto sopra: la
+frase successiva va a Google come col microfono.
 
 Non esiste un interruttore per spegnerlo. Un interruttore che promette "l'audio
 non lascia il computer" e poi ripiega sul cloud quando il modello locale manca

@@ -9,7 +9,11 @@ import {
   STORAGE_KEYS,
   VOICE_PITCH,
   VOICE_RATE,
+  WAKE_WORD_ENABLED_DEFAULT,
 } from '../config'
+import type { WakeKeyword } from '../speech/wakeWordConfig'
+import { clampWakeThreshold, normalizeWakeKeyword } from '../speech/wakeWordConfig'
+import type { WakeStatus } from '../speech/wakeWord'
 import type { Framing } from '../vrm/framing'
 import { clamp, debounce, readJson, writeJson } from './persistence'
 import { FALLBACK_MODELS, type ModelInfo } from '../ai/models'
@@ -34,22 +38,43 @@ import {
   type Memory,
   type Profile,
 } from '../memory/memory'
+import {
+  addReminder,
+  cancelReminders,
+  describeDue,
+  loadReminders,
+  popDue,
+  saveReminders,
+  type Reminder,
+} from '../memory/reminders'
 
 /**
  * Lettura della chiave salvata.
  *
- * `readJson` va bene ma la chiave è una stringa, e per una stringa è più
- * semplice chiamare `localStorage` direttamente: avvolgere una stringa in JSON
- * aggiungerebbe solo il rischio che uno spazio finale o una virgoletta faccia
- * fallire il parse al posto di passare.
+ * La chiave è una stringa e si legge/scrive grezza, senza JSON: avvolgerla in
+ * `JSON.stringify` aggiungerebbe virgolette al valore e la rilettura
+ * restituirebbe `"sk-or-…"` invece di `sk-or-…`. Le versioni precedenti
+ * scrivevano con `writeJson`, quindi qui si accetta anche quel formato per
+ * migrazione: se il valore sembra quotato si prova a decodificarlo.
  */
 function readStoredKey(): string {
+  let raw: string | null
   try {
-    return window.localStorage.getItem(STORAGE_KEYS.apiKey) ?? ''
+    raw = window.localStorage.getItem(STORAGE_KEYS.apiKey)
   } catch {
     // Modalità privata o storage negato: si chatta senza ricordare la chiave.
     return ''
   }
+  if (raw === null || raw === '') return ''
+  if (raw.startsWith('"')) {
+    try {
+      const decoded: unknown = JSON.parse(raw)
+      return typeof decoded === 'string' ? decoded : raw
+    } catch {
+      return raw
+    }
+  }
+  return raw
 }
 
 /** Il modello salvato deve essere ancora uno di quelli gratuiti di adesso. */
@@ -113,6 +138,18 @@ export type ListeningStatus =
   | 'denied'
   | 'error'
 
+/**
+ * Preferenze del risveglio vocale.
+ *
+ * La parola deve essere una di quelle bundled: un valore salvato da una
+ * versione con più modelli non deve rompere il selettore.
+ */
+export interface WakeWordPrefs {
+  enabled: boolean
+  keyword: WakeKeyword
+  threshold: number
+}
+
 export interface AppState {
   avatarPhase: AvatarPhase
   /** 0 → 1, aggiornato spesso durante il download del modello. */
@@ -139,6 +176,23 @@ export interface AppState {
   listeningError: string | null
   /** Lingua del riconoscimento. */
   sttLang: string
+
+  /* -------------------------------------------------------- wake word */
+
+  /**
+   * Preferenze del risveglio vocale locale.
+   *
+   * Spento di default: l'ascolto in background tiene il microfono aperto in
+   * permanenza, e deve essere una scelta esplicita — non una sorpresa dopo
+   * un aggiornamento.
+   */
+  wake: WakeWordPrefs
+  /** Stato del motore locale: non passa per `ListeningSession`. */
+  wakeStatus: WakeStatus
+  /** Ultimo errore del motore, mostrato finché non si riprova. */
+  wakeError: string | null
+  /** Ultimo risveglio rilevato, per la diagnostica. */
+  wakeLastDetect: { keyword: string; score: number; at: number } | null
 
   /* ------------------------------------------------------------- chat */
 
@@ -174,6 +228,16 @@ export interface AppState {
 
   /** Ricordi espliciti dell'utente: lui li chiede, lui li cancella. */
   memories: Memory[]
+  /** Promemoria in attesa di scadenza: li imposta l'utente, suonano una volta sola. */
+  reminders: Reminder[]
+  /**
+   * Ultimi promemoria scaduti, da mostrare come avviso.
+   *
+   * Effimero: non si persiste, si ricostruisce alla prossima scadenza. Vive
+   * nello store e non in un componente perché a farlo suonare è un timer
+   * fuori da React, e il banner deve vederlo comunque.
+   */
+  dueNotice: string | null
   /** Dati derivati dall'uso. */
   profile: Profile
 
@@ -185,21 +249,19 @@ export interface AppState {
   uploadedAvatars: UploadedAvatar[]
 }
 
-export type PanelId = 'avatar' | 'chat' | 'memory' | 'camera'
+export type PanelId = 'chat' | 'memory' | 'options'
 
 /**
  * Default dei pannelli: solo la chat aperta.
  *
- * Voce e camera servono a configurare, non a usare l'app. Aperti, rubano
- * metà schermo all'avatar e spingono il microfono sotto il bordo: è esattamente
- * il difetto da cui siamo partiti. La chat invece serve subito, perché è il
- * modo in cui si usa un assistente.
+ * Le opzioni servono a configurare, non a usare l'app. Aperte, rubano
+ * metà schermo all'avatar: è esattamente il difetto da cui siamo partiti. La
+ * chat invece serve subito, perché è il modo in cui si usa un assistente.
  */
 const DEFAULT_PANELS: Record<PanelId, boolean> = {
   chat: true,
-  avatar: false,
   memory: false,
-  camera: false,
+  options: false,
 }
 
 function parsePanels(raw: unknown): Record<PanelId, boolean> | null {
@@ -209,7 +271,16 @@ function parsePanels(raw: unknown): Record<PanelId, boolean> | null {
   for (const id of Object.keys(DEFAULT_PANELS) as PanelId[]) {
     if (typeof candidate[id] === 'boolean') found = true
   }
-  return found ? { ...DEFAULT_PANELS, ...candidate } : null
+  // Migrazione dal layout precedente (`avatar` a sinistra, `camera` a destra):
+  // se erano aperti, si apre il nuovo pannello Opzioni che li contiene entrambi.
+  const legacyOpen = candidate['camera'] === true || candidate['avatar'] === true
+  if (!found && !legacyOpen) return null
+  const next: Record<PanelId, boolean> = { ...DEFAULT_PANELS }
+  for (const id of Object.keys(DEFAULT_PANELS) as PanelId[]) {
+    if (typeof candidate[id] === 'boolean') next[id] = candidate[id]
+  }
+  if (typeof candidate['options'] !== 'boolean' && legacyOpen) next.options = true
+  return next
 }
 
 /**
@@ -341,6 +412,28 @@ function parseVoice(raw: unknown): VoicePrefs | null {
 
 const storedVoice = readJson(STORAGE_KEYS.voice, parseVoice, null)
 
+export const DEFAULT_WAKE: WakeWordPrefs = {
+  enabled: WAKE_WORD_ENABLED_DEFAULT,
+  keyword: 'hey_jarvis',
+  threshold: 0.5,
+}
+
+/**
+ * Il parser sta fuori dal `try` di `readJson` di proposito: dati corrotti e
+ * codice rotto devono restare distinguibili (vedi nota in `persistence.ts`).
+ */
+function parseWake(raw: unknown): WakeWordPrefs | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const candidate = raw as Partial<Record<keyof WakeWordPrefs, unknown>>
+  return {
+    enabled: candidate.enabled === true,
+    keyword: normalizeWakeKeyword(candidate.keyword),
+    threshold: clampWakeThreshold(candidate.threshold),
+  }
+}
+
+const storedWake = readJson(STORAGE_KEYS.wakeWord, parseWake, null)
+
 // La preferenza va depositata nel controller all'avvio, non solo nello stato:
 // se il primo turno di parola arrivasse prima che l'utente tocchi la casella,
 // il motore deve già sapere cosa vale.
@@ -369,6 +462,11 @@ let state: AppState = {
   listeningError: null,
   sttLang: STT_LANG,
 
+  wake: storedWake ?? DEFAULT_WAKE,
+  wakeStatus: 'off',
+  wakeError: null,
+  wakeLastDetect: null,
+
   apiKey: readStoredKey(),
   chatModel: readJson(STORAGE_KEYS.chatModel, parseChatModel, DEFAULT_CHAT_MODEL),
   freeModels: FALLBACK_MODELS,
@@ -384,6 +482,8 @@ let state: AppState = {
   panels: readJson(STORAGE_KEYS.panels, parsePanels, DEFAULT_PANELS),
 
   memories: loadMemories(),
+  reminders: loadReminders(),
+  dueNotice: null,
   profile: readJson(STORAGE_KEYS.profile, parseProfile, deriveProfile({})),
 
   avatarId: initialAvatarId,
@@ -427,11 +527,21 @@ const persistCamera = debounce(
 )
 
 const persistVoice = debounce(() => writeJson(STORAGE_KEYS.voice, state.voice), 300)
+const persistWake = debounce(() => writeJson(STORAGE_KEYS.wakeWord, state.wake), 300)
 
-const persistKey = debounce(() => writeJson(STORAGE_KEYS.apiKey, state.apiKey), 400)
+const persistKey = debounce(() => {
+  // Scrittura grezza, in coppia con `readStoredKey`: niente JSON, niente
+  // virgolette attorno alla chiave.
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.apiKey, state.apiKey)
+  } catch {
+    /* quota esaurita o storage negato: la chiave non viene salvata, pazienza */
+  }
+}, 400)
 const persistModel = debounce(() => writeJson(STORAGE_KEYS.chatModel, state.chatModel), 300)
 const persistPanels = debounce(() => writeJson(STORAGE_KEYS.panels, state.panels), 250)
 const persistMemories = debounce(() => saveMemories(state.memories), 200)
+const persistReminders = debounce(() => saveReminders(state.reminders), 200)
 const persistProfile = debounce(() => writeJson(STORAGE_KEYS.profile, state.profile), 400)
 const persistAvatar = debounce(() => writeJson(STORAGE_KEYS.avatarChoice, state.avatarId), 200)
 const persistUploaded = debounce(() => writeJson(STORAGE_KEYS.uploadedAvatars, state.uploadedAvatars), 400)
@@ -474,6 +584,9 @@ declare global {
       rememberMemory: typeof rememberMemory
       forgetMemory: typeof forgetMemory
       clearMemories: typeof clearMemories
+      scheduleReminder: typeof scheduleReminder
+      cancelReminder: typeof cancelReminder
+      dismissDueNotice: typeof dismissDueNotice
     }
   }
 }
@@ -488,16 +601,21 @@ if (import.meta.env.DEV) {
     rememberMemory,
     forgetMemory,
     clearMemories,
+    scheduleReminder,
+    cancelReminder,
+    dismissDueNotice,
   }
 }
 
 export function setState(patch: Partial<AppState>): void {
   const previousCamera = state.camera
   const previousVoice = state.voice
+  const previousWake = state.wake
   const previousKey = state.apiKey
   const previousModel = state.chatModel
   const previousPanels = state.panels
   const previousMemories = state.memories
+  const previousReminders = state.reminders
   const previousChat = state.chatMessages
   const previousAvatar = state.avatarId
   const previousUploaded = state.uploadedAvatars
@@ -505,10 +623,12 @@ export function setState(patch: Partial<AppState>): void {
   state = { ...state, ...patch }
   if (patch.camera !== undefined && patch.camera !== previousCamera) persistCamera()
   if (patch.voice !== undefined && patch.voice !== previousVoice) persistVoice()
+  if (patch.wake !== undefined && patch.wake !== previousWake) persistWake()
   if (patch.apiKey !== undefined && patch.apiKey !== previousKey) persistKey()
   if (patch.chatModel !== undefined && patch.chatModel !== previousModel) persistModel()
   if (patch.panels !== undefined && patch.panels !== previousPanels) persistPanels()
   if (patch.memories !== undefined && patch.memories !== previousMemories) persistMemories()
+  if (patch.reminders !== undefined && patch.reminders !== previousReminders) persistReminders()
   if (patch.chatMessages !== undefined && patch.chatMessages !== previousChat) persistConversation()
   if (patch.avatarId !== undefined && patch.avatarId !== previousAvatar) persistAvatar()
   if (patch.uploadedAvatars !== undefined && patch.uploadedAvatars !== previousUploaded) persistUploaded()
@@ -535,6 +655,18 @@ export function setBlinkWhileSpeaking(enabled: boolean): void {
 
 /** Campi che non sono preferenze ma stato effimero dell'ascolto. */
 export function setListening(patch: Partial<AppState>): void {
+  setState(patch)
+}
+
+/** Aggiorna le preferenze del risveglio e le persiste (debounce 300 ms). */
+export function setWake(patch: Partial<WakeWordPrefs>): void {
+  setState({ wake: { ...state.wake, ...patch } })
+}
+
+/** Stato effimero del motore locale: non si persiste, si ricostruisce. */
+export function setWakeStatus(
+  patch: Pick<AppState, 'wakeStatus'> & Partial<Pick<AppState, 'wakeError' | 'wakeLastDetect'>>,
+): void {
   setState(patch)
 }
 
@@ -604,6 +736,50 @@ export function forgetMemory(query: string): number {
 /** Svuota i ricordi: il pulsante nel pannello. */
 export function clearMemories(): void {
   setState({ memories: EMPTY_MEMORY })
+}
+
+/* ----------------------------------------------------------- promemoria */
+
+/**
+ * Imposta un promemoria.
+ *
+ * La scadenza ("fra 10 minuti", "alle 18:30") si risolve qui, non nel
+ * modello: il modello passa la frase originale e non un orario calcolato,
+ * così non può sbagliare il conto in silenzio.
+ */
+export function scheduleReminder(
+  text: string,
+  quando: string,
+): { added: boolean; reminder?: Reminder | undefined; error?: string | undefined } {
+  const esito = addReminder(text, quando, state.reminders)
+  if (esito.reminder === undefined) return { added: false, error: esito.error }
+  setState({ reminders: esito.reminders })
+  return { added: true, reminder: esito.reminder }
+}
+
+/** Annulla i promemoria che contengono il testo, o tutti con "tutto". */
+export function cancelReminder(query: string): number {
+  const { reminders, removed } = cancelReminders(query, state.reminders)
+  if (removed > 0) setState({ reminders })
+  return removed
+}
+
+/**
+ * Preleva i promemoria scaduti e alza l'avviso.
+ *
+ * Gli scaduti escono dall'elenco: suonano una volta sola. Chi chiama
+ * pronuncia il `dueNotice` e lo archivia con `dismissDueNotice`.
+ */
+export function consumeDueReminders(nowMs: number = Date.now()): Reminder[] {
+  const { due, rest } = popDue(state.reminders, nowMs)
+  if (due.length === 0) return due
+  setState({ reminders: rest, dueNotice: describeDue(due) })
+  return due
+}
+
+/** Chiude l'avviso di scadenza dopo averlo letto. */
+export function dismissDueNotice(): void {
+  if (state.dueNotice !== null) setState({ dueNotice: null })
 }
 
 /**

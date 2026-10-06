@@ -17,12 +17,12 @@
 
 import { streamChat, ChatError, FAILURE_MESSAGES, type ChatMessage, type ToolSpec } from './openrouter'
 import { SpeakableTail } from './speakQueue'
-import { describeToolCall, runMemoryTool, runTool, TOOLS } from './tools'
+import { describeToolCall, runMemoryTool, runReminderTool, runTool, TOOLS } from './tools'
 import type { ToolCall } from './openrouter'
 import { speech } from '../speech/speechController'
 import type { VoiceSettings } from '../speech/tts'
 import { buildMessages, buildSystemPrompt } from '../memory/memory'
-import { bumpProfile, forgetMemory, getState, rememberMemory } from '../store/appStore'
+import { bumpProfile, cancelReminder, forgetMemory, getState, rememberMemory, scheduleReminder } from '../store/appStore'
 import type { ModelInfo } from './models'
 
 export type ChatStatus = 'idle' | 'thinking' | 'streaming' | 'speaking'
@@ -124,6 +124,19 @@ export function createConversation(callbacks: ChatCallbacks): Session {
               const removed = forgetMemory(query)
               return { memories: getState().memories, removed }
             },
+          })
+        }
+        if (call.name === 'promemoria') {
+          return await runReminderTool(call, {
+            add: async (text, quando) => {
+              const esito = scheduleReminder(text, quando)
+              return { reminders: getState().reminders, reminder: esito.reminder, error: esito.error }
+            },
+            remove: async (query) => {
+              const removed = cancelReminder(query)
+              return { reminders: getState().reminders, removed }
+            },
+            list: async () => ({ reminders: getState().reminders }),
           })
         }
         return await runTool(call, navigator.language || 'it')

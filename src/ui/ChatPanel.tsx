@@ -1,37 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { conversation, sendUtterance } from '../ai/session'
 import { ChatInput } from './ChatInput'
 import { useChatShortcut } from './useChatShortcut'
-import { fetchFreeModels } from '../ai/models'
-import { setChat, useAppState } from '../store/appStore'
+import { useAppState } from '../store/appStore'
 
 /**
- * Impostazioni del modello e conversazione.
+ * Conversazione.
  *
- * La chiave OpenRouter viene chiesta qui, digitata dall'utente, e non esiste
- * da nessuna parte nel progetto. È una scelta con un compromesso: questa è
- * un'applicazione nel browser, quindi la chiave vive in `localStorage`, dove chi
- * usa lo stesso profilo la può leggere. Per un account gratuito con dei limiti
- * va bene; per una chiave con denaro dentro no. Meglio dirlo che farlo scrivere
- * e tacere.
+ * Solo cronologia e campo di testo: chiave e modello vivono nel pannello
+ * Opzioni (`ModelSettings`). Resta il controllo su `apiKey` per disabilitare
+ * l'invio finché non c'è una chiave.
  */
 export function ChatPanel() {
-  const {
-    apiKey,
-    chatModel,
-    chatStatus,
-    chatError,
-    chatPartial,
-    chatActivity,
-    chatMessages,
-    freeModels,
-    modelsLoading,
-    modelsError,
-  } = useAppState()
+  const { apiKey, chatStatus, chatError, chatPartial, chatActivity, chatMessages } = useAppState()
 
-  const [keyDraft, setKeyDraft] = useState(apiKey)
-  const [showKey, setShowKey] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useChatShortcut()
@@ -39,42 +22,12 @@ export function ChatPanel() {
   const configured = apiKey.trim() !== ''
   const busy = chatStatus !== 'idle'
 
-  // L'elenco dei modelli gratuiti cambia spesso, quindi si rilegge a ogni avvio
-  // invece di essere scritto nel codice.
-  const refreshModels = useCallback(async () => {
-    setChat({ modelsLoading: true, modelsError: null })
-    try {
-      const models = await fetchFreeModels()
-      // Un modello salvato che non è più gratuito va abbandonato: tenerlo
-      // significherebbe pagare senza che nessuno lo abbia deciso.
-      const salvato = models.some((m) => m.id === chatModel)
-      setChat({ freeModels: models, modelsLoading: false, chatModel: salvato ? chatModel : (models[0]?.id ?? chatModel) })
-    } catch (error) {
-      setChat({
-        modelsLoading: false,
-        modelsError: error instanceof Error ? error.message : 'Elenco modelli non raggiungibile.',
-      })
-    }
-  }, [chatModel])
-
-  useEffect(() => {
-    void refreshModels()
-    // Solo all'avvio: ripetere a ogni cambio di modello farebbe rechieste a ogni clic.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   // Il testo che scende segue il fondo: senza, durante una risposta lunga si
   // guarda sempre la prima riga.
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [chatMessages, chatPartial])
-
-  const salvataggio = useCallback(() => {
-    const chiave = keyDraft.trim()
-    if (chiave === apiKey) return
-    setChat({ apiKey: chiave, chatError: null })
-  }, [apiKey, keyDraft])
 
   return (
     <div>
@@ -87,74 +40,6 @@ export function ChatPanel() {
         >
           nuova conversazione
         </button>
-      </div>
-
-      {/* Chiave: campo password, mai mostrata in chiaro per comodità. */}
-      <div className="space-y-2">
-        <div className="flex gap-1.5">
-          <input
-            type={showKey ? 'text' : 'password'}
-            value={keyDraft}
-            onChange={(e) => setKeyDraft(e.target.value)}
-            onBlur={salvataggio}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') salvataggio()
-            }}
-            placeholder="chiave OpenRouter (sk-or-…)"
-            aria-label="Chiave OpenRouter"
-            spellCheck={false}
-            autoComplete="off"
-            className="w-full rounded-md border border-white/10 bg-slate-950/60 px-2 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-sky-500/50 focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={() => setShowKey((v) => !v)}
-            aria-label={showKey ? 'Nascondi la chiave' : 'Mostra la chiave'}
-            className="shrink-0 rounded-md border border-white/10 px-2 text-[10px] text-slate-500 transition hover:text-slate-300"
-          >
-            {showKey ? 'nascondi' : 'mostra'}
-          </button>
-        </div>
-
-        {configured && (
-          <p className="text-[10px] leading-relaxed text-slate-600">
-            Salvata su questo dispositivo, in <code>localStorage</code>. Chi usa lo stesso profilo
-            del browser può leggerla: usala solo per un account gratuito.
-          </p>
-        )}
-
-        {/* Modello: la lista arriva dalla rete, non è scritta qui. */}
-        <div className="flex gap-1.5">
-          <select
-            value={chatModel}
-            onChange={(e) => setChat({ chatModel: e.target.value })}
-            aria-label="Modello del linguaggio"
-            disabled={modelsLoading}
-            className="w-full rounded-md border border-white/10 bg-slate-950/60 px-2 py-1.5 text-xs text-slate-200 focus:border-sky-500/50 focus:outline-none disabled:opacity-50"
-          >
-            {freeModels.length === 0 && <option value={chatModel}>{chatModel}</option>}
-            {freeModels.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.name}
-                {model.supportsTools ? '' : ' · senza strumenti'}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => void refreshModels()}
-            disabled={modelsLoading}
-            aria-label="Rileggi l'elenco dei modelli gratuiti"
-            className="shrink-0 rounded-md border border-white/10 px-2 text-[10px] text-slate-500 transition hover:text-slate-300 disabled:opacity-40"
-          >
-            {modelsLoading ? '…' : '↻'}
-          </button>
-        </div>
-
-        <p className="text-[10px] text-slate-600">
-          {freeModels.length} modelli gratuiti · context {(freeModels.find((m) => m.id === chatModel)?.contextLength ?? 0).toLocaleString('it-IT')} token
-        </p>
-        {modelsError !== null && <p className="text-[10px] text-amber-300/80">{modelsError}</p>}
       </div>
 
       {/*
@@ -173,7 +58,7 @@ export function ChatPanel() {
       >
         {!configured && chatMessages.length === 0 && (
           <p className="text-slate-600">
-            Incolla la chiave OpenRouter qui sopra, poi tieni premuto il microfono. La chiave si
+            Incolla la chiave OpenRouter nelle Opzioni, poi tieni premuto il microfono. La chiave si
             prende su openrouter.ai/settings/keys.
           </p>
         )}
@@ -228,8 +113,7 @@ export function ChatPanel() {
 
       {!configured && (
         <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
-          Serve una chiave OpenRouter per usare il campo di testo. Si prende su
-          openrouter.ai/settings/keys.
+          Serve una chiave OpenRouter per usare il campo di testo: la trovi nel pannello Opzioni.
         </p>
       )}
     </div>

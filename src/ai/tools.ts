@@ -17,6 +17,7 @@
 
 import type { ToolCall, ToolSpec } from './openrouter'
 import type { Memory } from '../memory/memory'
+import { describePending, describeReminderCreated, type Reminder } from '../memory/reminders'
 
 const GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1/search'
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
@@ -283,6 +284,12 @@ export function describeToolCall(call: ToolCall): string {
   }
   if (call.name === REMEMBER_TOOL.name) return 'sta registrando un ricordo'
   if (call.name === FORGET_TOOL.name) return 'sta dimenticando qualcosa'
+  if (call.name === REMINDER_TOOL.name) {
+    const azione = testo(call.arguments.azione)
+    if (azione === 'elenca') return 'sta leggendo i promemoria'
+    if (azione === 'annulla') return 'sta annullando un promemoria'
+    return 'sta impostando un promemoria'
+  }
   return `sta usando ${call.name}`
 }
 
@@ -357,7 +364,37 @@ export const FORGET_TOOL: ToolSpec = {
   },
 }
 
-export const TOOLS: ToolSpec[] = [TIME_TOOL, WEATHER_TOOL, REMEMBER_TOOL, FORGET_TOOL]
+export const REMINDER_TOOL: ToolSpec = {
+  name: 'promemoria',
+  description:
+    "Imposta un promemoria che suonerà più tardi. Usalo quando l'utente dice 'ricordami fra...' o 'ricordami alle...'. Con azione 'elenca' mostra i promemoria in attesa, con 'annulla' li cancella. Non calcolare mai tu la scadenza: passa la frase originale in 'quando'.",
+  parameters: {
+    type: 'object',
+    properties: {
+      azione: {
+        type: 'string',
+        enum: ['crea', 'elenca', 'annulla'],
+        description: 'Crea, elenca o annulla. Se omessa, crea.',
+      },
+      testo: {
+        type: 'string',
+        description: 'Cosa ricordare, es. "spegnere il forno". Serve per creare.',
+      },
+      quando: {
+        type: 'string',
+        description:
+          'Quando, così come l\'ha detto l\'utente, es. "fra 10 minuti" o "alle 18:30". Serve per creare.',
+      },
+      cosa: {
+        type: 'string',
+        description: 'Parte del promemoria da annullare, es. "forno". Scrivi \'tutto\' per annullarli tutti.',
+      },
+    },
+    required: [],
+  },
+}
+
+export const TOOLS: ToolSpec[] = [TIME_TOOL, WEATHER_TOOL, REMEMBER_TOOL, FORGET_TOOL, REMINDER_TOOL]
 
 /* -------------------------------------------------------------- esecuzione */
 
@@ -435,4 +472,51 @@ export async function runMemoryTool(
   }
 
   return `Strumento sconosciuto: ${call.name}.`
+}
+
+/**
+ * Come vengono eseguiti i promemoria.
+ *
+ * Come gli strumenti di memoria, sono gli unici altri che **scrivono** stato
+ * (l'elenco dei promemoria), quindi ricevono un'implementazione di scrittura:
+ * senza, risponderebbero "fatto" senza aver impostato niente.
+ */
+export interface ReminderActions {
+  add: (text: string, quando: string) => Promise<{ reminders: Reminder[]; reminder?: Reminder | undefined; error?: string | undefined }>
+  remove: (query: string) => Promise<{ reminders: Reminder[]; removed: number }>
+  list: () => Promise<{ reminders: Reminder[] }>
+}
+
+export async function runReminderTool(
+  call: ToolCall,
+  actions: ReminderActions,
+): Promise<string> {
+  const azione = typeof call.arguments.azione === 'string' ? call.arguments.azione.trim() : 'crea'
+
+  if (azione === 'elenca') {
+    const esito = await actions.list()
+    return describePending(
+      esito.reminders.filter((r) => r.dueAt > Date.now()).sort((a, b) => a.dueAt - b.dueAt),
+    )
+  }
+
+  if (azione === 'annulla') {
+    const cosa = typeof call.arguments.cosa === 'string' ? call.arguments.cosa.trim() : ''
+    if (cosa === '') return 'Non so quale promemoria annullare: chiedi all\'utente di chiarire.'
+    const esito = await actions.remove(cosa)
+    if (esito.removed === 0) return `Non avevo nessun promemoria su "${cosa}".`
+    if (esito.removed === 1) return `Promemoria annullato: ${cosa}.`
+    return `Annullati ${esito.removed} promemoria su "${cosa}".`
+  }
+
+  const testo = typeof call.arguments.testo === 'string' ? call.arguments.testo.trim() : ''
+  const quando = typeof call.arguments.quando === 'string' ? call.arguments.quando.trim() : ''
+  if (testo === '' || quando === '') {
+    return 'Mi serve cosa ricordare e quando: per esempio "ricordami fra 10 minuti di spegnere il forno".'
+  }
+  const esito = await actions.add(testo, quando)
+  if (esito.error !== undefined || esito.reminder === undefined) {
+    return esito.error ?? 'Non sono riuscito a impostare il promemoria.'
+  }
+  return describeReminderCreated(esito.reminder)
 }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ListeningSession, type ListeningCallbacks } from '../speech/listening'
 import { isSpeechRecognitionSupported } from '../speech/stt'
 import { isMicrophoneSupported } from '../speech/vad'
+import { wakeWord } from '../speech/wakeWord'
 import { interruptReply, sendUtterance } from '../ai/session'
 import { speech } from '../speech/speechController'
 import { setListening, useAppState } from '../store/appStore'
@@ -108,6 +109,9 @@ export function MicButton() {
   // ------------------------------------------------------------------ azioni
   const begin = useCallback(async () => {
     setListening({ listeningError: null, interimTranscript: '' })
+    // Il risveglio in background tiene il microfono: lo sospendiamo, altrimenti
+    // due stream chiederebbero il microfono insieme.
+    await wakeWord.suspendForManual()
     const ok = await session?.start()
     // L'utente potrebbe aver già rilasciato mentre chiedevamo il permesso.
     // Senza questo controllo la sessione resterebbe accesa: il rilascio è già
@@ -115,6 +119,9 @@ export function MicButton() {
     if (ok && !holdingRef.current && !latchedRef.current) {
       const text = session?.stop() ?? ''
       if (text) sendUtterance(text)
+      // Solo nel rilascio anticipato: altrimenti la sessione è viva e il
+      // risveglio deve restare spento finché `end` non la chiude.
+      await wakeWord.resumeIfEnabled()
     }
   }, [session])
 
@@ -126,6 +133,7 @@ export function MicButton() {
         setListening({ lastUtterance: text, interimTranscript: '' })
         sendUtterance(text)
       }
+      void wakeWord.resumeIfEnabled()
     },
     [session],
   )

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 
 import { describeProfile } from '../memory/memory'
-import { clearMemories, forgetMemory, useAppState } from '../store/appStore'
+import { formatScadenza, pendingReminders } from '../memory/reminders'
+import { cancelReminder, clearMemories, forgetMemory, useAppState } from '../store/appStore'
 
 /**
  * I ricordi e il profilo, in chiaro.
@@ -17,8 +18,10 @@ import { clearMemories, forgetMemory, useAppState } from '../store/appStore'
  * assoluto: se per usarlo bisogna cercarlo, la memoria è già troppo invadente.
  */
 export function MemoryPanel() {
-  const { memories, profile } = useAppState()
+  const { memories, profile, reminders } = useAppState()
   const [conferma, setConferma] = useState(false)
+  // Solo i futuri, dal più vicino: gli scaduti suonano e spariscono da soli.
+  const pendenti = pendingReminders(reminders)
 
   return (
     <div>
@@ -84,6 +87,43 @@ export function MemoryPanel() {
         Non vengono inviati da nessuna parte tranne che a OpenRouter, e puoi cancellarli qui o a voce
         con «dimentica Milano».
       </p>
+
+      <div className="mb-1 mt-3 flex items-center justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-widest text-slate-600">
+          {pendenti.length === 0 ? 'nessun promemoria' : `${pendenti.length} promemoria`}
+        </span>
+      </div>
+
+      {pendenti.length === 0 ? (
+        <p className="text-[11px] leading-relaxed text-slate-600">
+          Puoi chiedere a voce: «ricordami fra dieci minuti di spegnere il forno». Suonerà qui, anche
+          se ricarichi la pagina.
+        </p>
+      ) : (
+        <ul className="mt-1 max-h-56 space-y-1 overflow-y-auto overscroll-contain">
+          {pendenti.map((reminder) => (
+            <li
+              key={reminder.id}
+              className="group flex items-start gap-2 rounded-lg border border-white/5 bg-slate-950/40 px-2.5 py-2"
+            >
+              <span className="flex-1 text-[11px] leading-relaxed text-slate-300">
+                {reminder.text}
+                <span className="block text-[10px] text-slate-500">
+                  {formatScadenza(reminder.dueAt)}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => cancelReminder(reminder.text)}
+                aria-label={`Annulla promemoria: ${reminder.text}`}
+                className="shrink-0 rounded px-1 text-[11px] text-slate-600 transition hover:text-rose-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-500/60"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

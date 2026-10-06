@@ -73,10 +73,12 @@ export const STORAGE_KEYS = {
   chatModel: 'vrmchat.openrouter.model.v1',
   panels: 'vrmchat.panels.v1',
   memories: 'vrmchat.memories.v1',
+  reminders: 'vrmchat.reminders.v1',
   profile: 'vrmchat.profile.v1',
   conversation: 'vrmchat.conversation.v1',
   avatarChoice: 'vrmchat.avatar.choice.v1',
   uploadedAvatars: 'vrmchat.avatar.uploaded.v1',
+  wakeWord: 'vrmchat.wakeword.v1',
 } as const
 
 /**
@@ -120,7 +122,8 @@ Regole:
 - Una domanda sola alla volta, e solo se serve davvero.
 - Se non sai, dillo. Meglio una risposta onesta che una inventata.
 - Non citati fonti, non fornisci link: non puoi leglerli ad alta voce.
-- Hai quattro strumenti: "ora" per l'ora e la data, "meteo" per il tempo in una città, "ricorda" e "dimentica" per la memoria. Sul tempo non indovinare mai: se ti chiedono il tempo, chiama lo strumento.
+ - Hai cinque strumenti: "ora" per l'ora e la data, "meteo" per il tempo in una città, "ricorda" e "dimentica" per la memoria, "promemoria" per gli avvisi futuri. Sul tempo non indovinare mai: se ti chiedono il tempo, chiama lo strumento.
+ - Se l'utente dice "ricordami fra..." o "ricordami alle...", chiama "promemoria" con azione "crea": il messaggio va in "testo", la scadenza originale va in "quando" così com'è ("fra 10 minuti", "alle 18:30"). Non calcolare mai tu l'orario.
 - Se l'utente dice "ricorda che..." o "ricorda che mi chiamo...", chiama "ricorda" prima di confermare. Non dire "te lo ricorderò" senza averlo salvato.
 - Il tuo nome è "Ari".`
 
@@ -130,6 +133,18 @@ export const VOICE_PITCH = { min: 0.5, max: 1.8, step: 0.05 } as const
 
 /** Lingua del riconoscimento predefinita. */
 export const STT_LANG = 'it-IT'
+
+/**
+ * Risveglio vocale locale (wake word).
+ *
+ * I valori vivono qui e non nei moduli per lo stesso motivo di
+ * `BLINK_WHILE_SPEAKING`: li leggono il pannello, lo store e il controller,
+ * e due copie divergenti significherebbero un toggle che dice una cosa e un
+ * motore che ne fa un'altra. La parola di default è `hey_jarvis` perché è il
+ * modello più robusto fra quelli bundled; "Ari" richiederebbe un training
+ * custom, fuori scope finché non c'è.
+ */
+export const WAKE_WORD_ENABLED_DEFAULT = false
 
 /**
  * Tetto dei caratteri scrivibili in un messaggio.

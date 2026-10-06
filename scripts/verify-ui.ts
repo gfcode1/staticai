@@ -235,7 +235,7 @@ async function main() {
           controlla: !!document.getElementById(b.getAttribute('aria-controls') ?? ''),
         }))
       })
-      verifica('i pannelli dichiarano aria-expanded', prima.length === 4, JSON.stringify(prima.map((x) => x.aperto)))
+      verifica('i pannelli dichiarano aria-expanded', prima.length === 3, JSON.stringify(prima.map((x) => x.aperto)))
       verifica('default: chat aperta, altri chiusi', prima.filter((x) => x.aperto === 'true').length === 1, JSON.stringify(prima))
       verifica('ogni pannello controlla un corpo esistente', prima.every((x) => x.controlla))
 
@@ -283,7 +283,7 @@ async function main() {
       verifica('le due schede ci sono', aperta.schede.length === 2, JSON.stringify(aperta.schede))
       verifica('la chat è la scheda iniziale', aperta.selezionata === 'Chat')
 
-      for (const nome of ['Camera']) {
+      for (const nome of ['Opzioni']) {
         await page.getByRole('tab', { name: nome }).click()
         await page.waitForTimeout(400)
         const dentro = await page.evaluate(() => ({
@@ -334,18 +334,23 @@ async function main() {
       await page.waitForFunction(() => !!window.__avatarDiagnostics, undefined, { timeout: 180000 })
       await page.waitForTimeout(1600)
 
-      const selettore = page.locator('button[aria-expanded]').filter({ hasText: 'Avatar' })
-      verifica('il pannello Avatar esiste', (await selettore.count()) === 1)
+      const selettore = page.locator('button[aria-expanded]').filter({ hasText: 'Opzioni' })
+      verifica('il pannello Opzioni esiste', (await selettore.count()) === 1)
       await selettore.click()
       await page.waitForTimeout(500)
 
       // Si registra l'**indice** del pulsante e non il suo testo: il nome
       // accessibile concatena etichetta e nota di licenza, quindi selezionarlo
       // per nome significherebbe accettare una stringa lunga e fragile.
+      // I pulsanti avatar vivono nella sezione "Avatar" dentro Opzioni: le
+      // tre voci di inquadratura (Volto/Busto/Figura) hanno anch'esse
+      // `aria-pressed` e vanno escluse, altrimenti il cambio cliccherebbe un
+      // framing invece di un modello.
       const voci = await page.evaluate(() => {
-        const b = [...document.querySelectorAll('button[aria-expanded]')].find((x) => /Avatar/i.test(x.textContent ?? ''))
+        const b = [...document.querySelectorAll('button[aria-expanded]')].find((x) => /Opzioni/i.test(x.textContent ?? ''))
         const corpo = document.getElementById(b?.getAttribute('aria-controls') ?? '')
-        const pulsanti = corpo ? [...corpo.querySelectorAll('button[aria-pressed]')] : []
+        const sezioneAvatar = corpo?.querySelector('section[aria-label="Avatar"]') ?? corpo
+        const pulsanti = sezioneAvatar ? [...sezioneAvatar.querySelectorAll('button[aria-pressed]')] : []
         return {
           tot: pulsanti.length,
           nomi: pulsanti.map((x) => x.getAttribute('aria-label') ?? x.textContent?.slice(0, 20) ?? ''),
@@ -382,10 +387,11 @@ async function main() {
       }
       verifica("c'è un altro modello da scegliere", indiceAltro >= 0, JSON.stringify(voci.nomi))
       if (indiceAltro >= 0) {
-        const pannello = page.locator('button[aria-expanded]').filter({ hasText: 'Avatar' })
+        const pannello = page.locator('button[aria-expanded]').filter({ hasText: 'Opzioni' })
         await pannello.evaluate((b, i) => {
           const corpo = document.getElementById(b.getAttribute('aria-controls') ?? '')
-          const pulsanti = corpo ? [...corpo.querySelectorAll('button[aria-pressed]')] : []
+          const sezioneAvatar = corpo?.querySelector('section[aria-label="Avatar"]') ?? corpo
+          const pulsanti = sezioneAvatar ? [...sezioneAvatar.querySelectorAll('button[aria-pressed]')] : []
           pulsanti[i]?.click()
         }, indiceAltro)
         await page.waitForTimeout(5000)

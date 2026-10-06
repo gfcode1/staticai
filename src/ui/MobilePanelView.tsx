@@ -14,14 +14,14 @@ import { useState, type ReactNode } from 'react'
  */
 export interface MobilePanelViewProps {
   chat: ReactNode
-  camera: ReactNode
+  options: ReactNode
   onClose: () => void
 }
 
-export function MobilePanelView({ chat, camera, onClose }: MobilePanelViewProps) {
+export function MobilePanelView({ chat, options, onClose }: MobilePanelViewProps) {
   const tabs = [
     { id: 'chat', label: 'Chat', content: chat },
-    { id: 'camera', label: 'Camera', content: camera },
+    { id: 'options', label: 'Opzioni', content: options },
   ] as const
   const [active, setActive] = useState<(typeof tabs)[number]['id']>('chat')
   const tab = tabs.find((t) => t.id === active) ?? tabs[0]

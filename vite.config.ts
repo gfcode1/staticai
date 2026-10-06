@@ -19,6 +19,9 @@ export default defineConfig({
         manualChunks(id: string) {
           if (id.includes('node_modules/@pixiv/three-vrm')) return 'vrm'
           if (id.includes('node_modules/three')) return 'three'
+          // Il runtime ONNX (~MB) entra solo col risveglio vocale, che è
+          // opt-in e lazy: non deve pesare sul primo paint dell'avatar.
+          if (id.includes('node_modules/onnxruntime-web')) return 'ort'
           return undefined
         },
       },

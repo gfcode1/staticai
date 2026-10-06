@@ -1,20 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { AvatarStage } from './vrm/AvatarStage'
 import { useAvatarUrl } from './ui/useAvatarUrl'
 import { AvatarLoader } from './ui/AvatarLoader'
-import { AvatarPicker } from './ui/AvatarPicker'
-import { CameraPanel } from './ui/CameraPanel'
 import { Collapsible } from './ui/Collapsible'
 import { ChatPanel } from './ui/ChatPanel'
 import { MemoryPanel } from './ui/MemoryPanel'
 import { MicButton } from './ui/MicButton'
 import { MobilePanelView } from './ui/MobilePanelView'
+import { OptionsPanel } from './ui/OptionsPanel'
 import { PanelRail } from './ui/PanelRail'
 import { StatusBar } from './ui/StatusBar'
 import { useWideLayout } from './ui/useMediaQuery'
-import { useAppState, setPanel } from './store/appStore'
-import { bundledById } from './vrm/avatarLibrary'
+import { consumeDueReminders, dismissDueNotice, getState, useAppState, setPanel, voiceSettings } from './store/appStore'
+import { describeDue, startReminderLoop } from './memory/reminders'
+import { speech } from './speech/speechController'
 
 /**
  * Scheletro a due zone sovrapposte.
@@ -29,16 +29,28 @@ import { bundledById } from './vrm/avatarLibrary'
  * Ora la barra è ancorata in assoluto e non ha antenati in grado di spostarla:
  * per quanto si apra, si può chiudere e si scrive, il pulsante resta dov'è.
  */
-/** Il nome dell'avatar in uso, per il pannello chiuso. */
-function avatarLabel(avatarId: string, caricati: { id: string; name: string }[]): string {
-  return bundledById(avatarId)?.label ?? caricati.find((a) => a.id === avatarId)?.name ?? 'dal tuo computer'
-}
-
 export default function App() {
-  const { panels, memories, avatarId, uploadedAvatars } = useAppState()
+  const { panels, memories, reminders, dueNotice, avatarId } = useAppState()
   const { url: urlAvatar, error: avatarUrlError } = useAvatarUrl(avatarId)
   const wide = useWideLayout()
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Scadenze dei promemoria: un controllo ogni 15 s, più uno immediato al
+  // montaggio così quelli rimasti indietro (notte, ricaricamento) suonano subito.
+  // La frase va sia a video (banner) sia in voce: un promemoria silenzioso
+  // mentre si guarda altrove non serve a niente.
+  useEffect(() => {
+    const stop = startReminderLoop(
+      () => consumeDueReminders(),
+      (due) => {
+        const { voice } = getState()
+        void speech.speak(describeDue(due), voiceSettings(voice)).catch(() => {
+          /* senza audio resta comunque il banner, che è già nello store */
+        })
+      },
+    )
+    return stop
+  }, [])
 
   return (
     <div className="relative h-full w-full overflow-hidden">
@@ -61,23 +73,8 @@ export default function App() {
       {/* Zona superiore: rail a sinistra, nastro dei pannelli a destra. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-4 p-4 sm:p-6">
         <div className="pointer-events-auto flex flex-col gap-3">
-          <header className="rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3 shadow-2xl backdrop-blur-md">
-            <h1 className="text-sm font-semibold tracking-tight text-slate-100">Assistente VRM</h1>
-            <p className="mt-0.5 text-xs text-slate-500">Fase 0–4 · scena 3D, voce, ascolto e chat</p>
-          </header>
-
           {wide && (
             <PanelRail>
-              <Collapsible
-                title="Avatar"
-                open={panels.avatar}
-                onOpenChange={(open) => setPanel('avatar', open)}
-                badge={panels.avatar ? undefined : avatarLabel(avatarId, uploadedAvatars)}
-                bodyClassName="px-4 pb-4"
-              >
-                <AvatarPicker />
-              </Collapsible>
-
               <Collapsible
                 title="Chat"
                 open={panels.chat}
@@ -92,7 +89,11 @@ export default function App() {
                 title="Ricordi"
                 open={panels.memory}
                 onOpenChange={(open) => setPanel('memory', open)}
-                badge={panels.memory ? undefined : `${memories.length} ricordi · profilo`}
+                badge={
+                  panels.memory
+                    ? undefined
+                    : `${memories.length} ricordi · profilo${reminders.length > 0 ? ` · ${reminders.length} promemoria` : ''}`
+                }
                 bodyClassName="px-4 pb-4"
               >
                 <MemoryPanel />
@@ -113,15 +114,15 @@ export default function App() {
         </div>
 
         {wide && (
-          <div className="pointer-events-auto flex w-[min(18rem,calc(100vw-2rem))] flex-col gap-2">
+          <div className="pointer-events-auto flex max-h-[calc(100dvh-11rem)] w-[min(18rem,calc(100vw-2rem))] flex-col gap-2 overflow-y-auto overscroll-contain pr-0.5 [&>*]:shrink-0">
             <Collapsible
-              title="Camera"
-              open={panels.camera}
-              onOpenChange={(open) => setPanel('camera', open)}
-              badge={panels.camera ? undefined : 'inquadratura'}
+              title="Opzioni"
+              open={panels.options}
+              onOpenChange={(open) => setPanel('options', open)}
+              badge={panels.options ? undefined : 'inquadratura, avatar e modello'}
               bodyClassName="px-4 pb-4"
             >
-              <CameraPanel />
+              <OptionsPanel />
             </Collapsible>
           </div>
         )}
@@ -130,7 +131,7 @@ export default function App() {
       {!wide && mobileOpen && (
         <MobilePanelView
           chat={<ChatPanel />}
-          camera={<CameraPanel />}
+          options={<OptionsPanel />}
           onClose={() => setMobileOpen(false)}
         />
       )}
@@ -140,6 +141,21 @@ export default function App() {
         pannelli: è la ragione per cui il difetto non può tornare.
       */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-2 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent px-4 pb-3 pt-12 sm:px-6 sm:pb-4">
+        {dueNotice !== null && (
+          <div
+            role="alert"
+            className="pointer-events-auto flex w-fit max-w-full items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-950/80 px-4 py-2.5 shadow-2xl backdrop-blur-md"
+          >
+            <p className="text-xs leading-relaxed text-amber-100">{dueNotice}</p>
+            <button
+              type="button"
+              onClick={dismissDueNotice}
+              className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-amber-200 transition hover:bg-amber-400/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400/60"
+            >
+              ok, ho capito
+            </button>
+          </div>
+        )}
         <div className="pointer-events-auto">
           <MicButton />
         </div>

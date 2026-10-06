@@ -11,17 +11,19 @@
     "typecheck": "tsc -b --noEmit && node --experimental-strip-types --no-warnings scripts/check-scripts.ts",
     "test:speech": "node --experimental-strip-types scripts/run-speech-checks.ts",
     "test:listening": "node --experimental-strip-types scripts/run-listening-checks.ts",
-    "test": "npm run test:speech && npm run test:listening && npm run test:ai && npm run test:tools && npm run test:memory && npm run test:store && npm run test:avatar",
+    "test": "npm run test:speech && npm run test:listening && npm run test:ai && npm run test:tools && npm run test:memory && npm run test:store && npm run test:avatar && npm run test:wakeword",
     "test:ai": "node --experimental-strip-types scripts/run-ai-checks.ts",
     "test:ui": "node --experimental-strip-types scripts/verify-ui.ts",
     "test:tools": "node --experimental-strip-types scripts/run-tools-checks.ts",
     "check:live": "node --experimental-strip-types --no-warnings scripts/check-live-tools.ts",
     "test:memory": "node --experimental-strip-types scripts/run-memory-checks.ts",
     "test:store": "node --experimental-strip-types scripts/run-store-checks.ts",
-    "test:avatar": "node --experimental-strip-types scripts/run-avatar-checks.ts"
+    "test:avatar": "node --experimental-strip-types scripts/run-avatar-checks.ts",
+    "test:wakeword": "node --experimental-strip-types scripts/run-wakeword-checks.ts"
   },
   "dependencies": {
     "@pixiv/three-vrm": "3.5.5",
+    "onnxruntime-web": "^1.30.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "0.180.0"
@@ -39,5 +41,5 @@
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   },
-  "description": "Assistente vocale con avatar VRM \u2014 Web Speech API + OpenRouter"
+  "description": "Assistente vocale con avatar VRM — Web Speech API + OpenRouter"
 }
